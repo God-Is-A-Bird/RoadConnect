@@ -3,14 +3,15 @@ Class Structure
 °°°"""
 #|%%--%%| <o7S3MGfNLq|d1C9LohqaR>
 import shapely
+import pandas as pd
 import geopandas as gpd
 import rasterio
 import json
 
 class Model:
     def __init__(self, roadpath, roadtypepath, drainpath, pondpath, flowpathpath, elevationpath):
-        self.graph = Graph()
-        self.data = Data(roadpath=roadpath, roadtypepath=roadtypepath, drainpath=drainpath, pondpath=pondpath, flowpathpath=flowpathpath, elevationpath=elevationpath)
+        self.graph = Graph(model=self)
+        self.data = Data(model=self, roadpath=roadpath, roadtypepath=roadtypepath, drainpath=drainpath, pondpath=pondpath, flowpathpath=flowpathpath, elevationpath=elevationpath)
 
 class GraphNode:
     def __init__(
@@ -54,7 +55,9 @@ class GraphNode:
         }
 
 class Graph(Model):
-    def __init__(self):
+    def __init__(self, model:Model):
+        self.model = model
+
         self.graph = {}  # Dictionary of GraphNodes
 
     # Graph access
@@ -83,53 +86,82 @@ class Graph(Model):
         pass
 
 class Data(Model):
-    def __init__(self, roadpath, roadtypepath, drainpath, pondpath, flowpathpath, elevationpath):
+    def __init__(self, model:Model, roadpath, roadtypepath, drainpath, pondpath, flowpathpath, elevationpath):
+        self.model = model
+
+        self.elevation = self.Elevation(elevationpath)
         self.roads = self.Roads(roadpath, roadtypepath)
         self.drains = self.Drains(drainpath)
         self.ponds = self.Ponds(pondpath)
         self.flowpaths = self.Flowpaths(flowpathpath)
-        self.elevation = self.Elevation(elevationpath)
-        
+
         self._vd_projections()
+        self.create_graph()
 
     def _vd_projections(self):
-        # TODO: `to_epsg()` should be same for all
-        pass
+        epsg_codes = [ obj.gdf.crs.to_epsg() for obj in [self.roads, self.drains, self.ponds, self.flowpaths] ]
+        epsg_codes.extend( [ obj.md['crs'].to_epsg() for obj in [self.elevation] ] )
+
+        if len(set(epsg_codes)) != 1: raise RuntimeError("Mismatching CRS")
 
     def create_graph(self):
 
         self._vd_data()
 
         # For point in drains+ponds, create a node in the graph, calculating Directly Connected Segments, Type, Elevation, Child Node, and Distance to Child
-        for _, row in self.data.drains.gdf.itterows():
+        for _, row in self.drains.gdf.iterrows():
             point = row.geometry
             node_type = "D"
-            elevation = 
-
+            elevation = row['ELEVATION'][0]
             node = GraphNode(point=point, node_type=node_type, elevation=elevation)
-            node.index = row.geometry
-            node.node['Type'] = 'D'
+            self.model.graph.add_node(node=node)
 
-            self.graph.add_node()
-
-        for pond in self.data.ponds.gdf:
-            self.graph.add_node()
-        pass
+        for _, row in self.ponds.gdf.iterrows():
+            point = row.geometry
+            node_type = "P"
+            elevation = row['ELEVATION'][0]
+            node = GraphNode(point=point, node_type=node_type, elevation=elevation)
+            self.model.graph.add_node(node=node)
 
     def _vd_data(self):
 
-        # Roads
+        # Roads - already called during Roads.__init__() but we run again in case changes were made
         self.roads._vd_road_types()
         self.roads._vd_length_and_area()
 
-        # Flowpaths
+
+        # Flowpaths - already called during Flowpaths.__init__() but we run again in case changes were made
         self.flowpaths._vd_lines()
 
-        # Validate that Drains/Ponds are valid with Flowpaths
-        # TODO: Validate that for all drain and pond points, there is only a single (or perhaps zero) flowpath connected to it that goes downhill.
 
-        # Validate that Drains/Ponds are valid with Elevation
-        # TODO: Make sure that is valid elevation data for all points
+        # Validate that for all drain and pond points, there is only a single (or perhaps zero) flowpath connected to it that goes downhill.
+        points_gdf = pd.concat([self.drains.gdf, self.ponds.gdf], ignore_index=True)
+        invalid_flowpath_indexes = []
+
+        with rasterio.open(elevationpath) as src:
+            for _, point in points_gdf.iterrows():
+                intersecting_paths = self.flowpaths.gdf[self.flowpaths.gdf.intersects(point['geometry'])]
+
+                # Count downhill flowpaths
+                downhill_paths = []
+                for path_idx, path in intersecting_paths.iterrows():
+                    # Sample start and end point elevations
+                    start = shapely.geometry.Point(path.geometry.coords[0])
+                    end = shapely.geometry.Point(path.geometry.coords[-1])
+
+                    start_elev = list(src.sample([(start.x, start.y)]))[0]
+                    end_elev = list(src.sample([(end.x, end.y)]))[0]
+
+                    # Check if path goes downhill
+                    if (start.intersects(point.geometry) and end_elev < point['ELEVATION']) or \
+                       (end.intersects(point.geometry) and start_elev < point['ELEVATION']):
+                        downhill_paths.append(path_idx)
+
+                # Track invalid flowpath indexes
+                if len(downhill_paths) > 1:
+                    invalid_flowpath_indexes.extend(downhill_paths)
+
+        if invalid_flowpath_indexes: raise ValueError(f"Multiple downhill flowpaths connected to the same node: {invalid_flowpath_indexes}")
 
         # Validation Continued...
         # TODO: This validation is incomplete, complete validation would require checking for intersecting flowpaths, ...
@@ -141,12 +173,18 @@ class Data(Model):
             self.gdf : gpd.GeoDataFrame = gpd.read_file(roadpath)
             self.types = json.load(open(roadtypepath))['road_types']
 
+            self._vd_road_types()
+            self._vd_length_and_area()
+
         # Data Validation Functions
         def _vd_road_types(self):
-            pass
+            unknown_types = set(self.gdf['TYPE']) - set(self.types)
+            if unknown_types: raise ValueError(f"Unknown road types: {unknown_types}")
 
         def _vd_length_and_area(self):
-            pass
+            if (zero_indexes := [idx for idx, (length, area) in enumerate(zip(self.gdf['LENGTH'], self.gdf['AREA'])) if length <= 0 or area <= 0]):
+                raise ValueError(f"Zero or negative LENGTH/AREA at road indexes: {zero_indexes}")
+
 
         # Pre-Processing Functions
         def _pp_calculate_idx(self):
@@ -158,22 +196,27 @@ class Data(Model):
     class Drains:
         def __init__(self, drainpath):
             self.gdf : gpd.GeoDataFrame = gpd.read_file(drainpath)
+            self._calculate_elevation()
 
         def _calculate_elevation(self):
-            pass
+            with rasterio.open(elevationpath) as src:
+                self.gdf['ELEVATION'] = list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))
+                if (null_indexes := [i for i, x in enumerate(self.gdf['ELEVATION']) if x == src.nodata]):
+                    raise ValueError(f"Features with null elevation at drain indexes: {null_indexes}")
 
         def _add_to_graph(self):
             pass
 
     class Ponds:
         def __init__(self, pondpath):
-            self.gdf = gpd.read_file(pondpath)
-
-        def read(self, drainpath):
-            pass
+            self.gdf : gpd.GeoDataFrame = gpd.read_file(pondpath)
+            self._calculate_elevation()
 
         def _calculate_elevation(self):
-            pass
+            with rasterio.open(elevationpath) as src:
+                self.gdf['ELEVATION'] = list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))
+                if (null_indexes := [i for i, x in enumerate(self.gdf['ELEVATION']) if x == src.nodata]):
+                    raise ValueError(f"Features with null elevation at pond indexes: {null_indexes}")
 
         def _add_to_graph(self):
             pass
@@ -181,10 +224,22 @@ class Data(Model):
     class Flowpaths:
         def __init__(self, flowpathpath):
             self.gdf = gpd.read_file(flowpathpath)
+            self._vd_lines()
 
         def _vd_lines(self):
-            # TODO: Is non-branching
-            pass
+            invalid_indexes =  [idx for idx, line in enumerate(self.gdf.geometry) if not line.is_simple]
+            if invalid_indexes: raise ValueError(f"Self-intersecting lines at indexes: {invalid_indexes}")
+
+        def _is_downhill_path(self, path, point, elevation_src):
+            start = shapely.geometry.Point(path.geometry.coords[0])
+            end = shapely.geometry.Point(path.geometry.coords[-1])
+
+            start_elev = list(elevation_src.sample([(start.x, start.y)]))[0]
+            end_elev = list(elevation_src.sample([(end.x, end.y)]))[0]
+
+            return (start.intersects(point.geometry) and end_elev < point['ELEVATION']) or \
+                   (end.intersects(point.geometry) and start_elev < point['ELEVATION'])
+
 
     class Elevation:
         def __init__(self, elevationpath):
@@ -194,20 +249,14 @@ class Data(Model):
                 self.md = src.meta
 
 
-        def read(self, dempath):
-            pass
-
-
-#|%%--%%| <d1C9LohqaR|1eSca5QkZ3>
-
 roadpath = 'roads.shp'
-roadtypepath = 'roadtypes.ini'
+roadtypepath = 'roadtypes.json'
 drainpath = 'drains.shp'
 pondpath = 'ponds.shp'
 flowpathpath = 'flowpaths.shp'
-elevationpath = 'elevation.tiff'
+elevationpath = 'elevation.tif'
 
-d = Data(
+m = Model(
     roadpath=roadpath,
     roadtypepath=roadtypepath,
     drainpath=drainpath,
@@ -216,27 +265,11 @@ d = Data(
     elevationpath=elevationpath
 )
 
-#|%%--%%| <1eSca5QkZ3|tMPv2Swdwf>
+#|%%--%%| <d1C9LohqaR|1eSca5QkZ3>
 
-import rasterio
+m.graph.graph
 
-with rasterio.open('../../CACHE/__EPSG_6566__EXTENT_-65_303_18_277_-65_281_18_302/DEM/dem.tif') as src:
-    array = src.read()
-    md = src.meta
-
-
-md['crs'].to_epsg()
-#|%%--%%| <tMPv2Swdwf|Wf4TDGZBFP>
-
-import geopandas as gpd
-
-gpd = gpd.read_file('../../CACHE/__EPSG_6566__EXTENT_-65_303_18_277_-65_281_18_302/ROAD/road_edges.shp')
-
-gpd.crs.to_epsg()
-
-
-
-#|%%--%%| <Wf4TDGZBFP|W2IEaMA0wo>
+#|%%--%%| <1eSca5QkZ3|W2IEaMA0wo>
 
 
 
