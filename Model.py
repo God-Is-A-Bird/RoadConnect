@@ -3,17 +3,112 @@ Class Structure
 °°°"""
 #|%%--%%| <o7S3MGfNLq|d1C9LohqaR>
 import shapely
-from shapely.lib import create_collection
 import pandas as pd
 import geopandas as gpd
 import rasterio
 import json
+import networkx as nx
+from tqdm import tqdm
+from copy import deepcopy
+import numpy as np
 
 class Model:
     def __init__(self, roadpath, roadtypepath, drainpath, pondpath, flowpathpath, elevationpath, configpath):
         self.rainfall_data = json.load(open(configpath))['rainfall_values']
         self.graph = Graph(model=self)
         self.data = Data(model=self, roadpath=roadpath, roadtypepath=roadtypepath, drainpath=drainpath, pondpath=pondpath, flowpathpath=flowpathpath, elevationpath=elevationpath)
+
+    def run(self):
+        print("BUILDING GRAPH...")
+        self.graph.build_graph()
+
+        # Get Resulting Graphs
+        self.result_graphs = []
+        for rainfall_event in tqdm(self.rainfall_data, total=len(self.rainfall_data)):
+            g = deepcopy(self.graph.graph)
+
+            for k, v in g.items():
+
+                # Calculate Direct Runoff
+                v['Directly_Connected_Segments']['Runoff'] = {key: value * (rainfall_event/1000) * self.data.roads.types[key]['runoff_coefficient'] for key, value in v['Directly_Connected_Segments']['Area'].items()}
+
+                # Calculate Direct Sediment
+                v['Directly_Connected_Segments']['Sediment'] = {key: (rainfall_event/1000) * self.data.roads.types[key]['erosion_rate'] * v['Directly_Connected_Segments']['Area'][key] for key, value in v['Directly_Connected_Segments']['Runoff'].items() if value > 0}
+
+                # Calculate Direct Road Indicies
+                for key, value in v['Directly_Connected_Segments']['Indices'].items():
+                    v['All_Connected_Segments']['Indices'][key] = v['All_Connected_Segments']['Indices'].get(key, []) + value
+
+                # Calculate Direct Road Length
+                for key, value in v['Directly_Connected_Segments']['Length'].items():
+                    v['All_Connected_Segments']['Length'][key] = v['All_Connected_Segments']['Length'].get(key, 0) + value
+
+                # Calculate Direct Road Area
+                for key, value in v['Directly_Connected_Segments']['Area'].items():
+                    v['All_Connected_Segments']['Area'][key] = v['All_Connected_Segments']['Area'].get(key, 0) + value
+
+                # Add Direct Runoff To All Runoff
+                for key, value in v['Directly_Connected_Segments']['Runoff'].items():
+                    v['All_Connected_Segments']['Runoff'][key] = v['All_Connected_Segments']['Runoff'].get(key, 0) + value
+
+                # Add Direct Sediment To All Sediment
+                for key, value in v['Directly_Connected_Segments']['Sediment'].items():
+                    v['All_Connected_Segments']['Sediment'][key] = v['All_Connected_Segments']['Sediment'].get(key, 0) + value
+
+                # Calculate Totals For Runoff & Sediment
+                v['Runoff_Total'] = sum( v['All_Connected_Segments']['Runoff'].values() )
+                v['Sediment_Total'] = sum( v['All_Connected_Segments']['Sediment'].values() )
+
+                # Pond Traps Sediment
+                if v['Type'] == 'P' and v['Runoff_Total'] > 0:
+
+                    trapping_efficiency = float(np.clip(
+                        -22 + ( (119 * ((v['Pond_Max_Capacity'] - v['Pond_Used_Capacity']) / v['Runoff_Total'])) / (0.012 + 1.02 * ((v['Pond_Max_Capacity'] - v['Pond_Used_Capacity']) / v['Runoff_Total']))),
+                        0, # Min Eff
+                        100 # Max Eff
+                    ) / 100) # Turn to percent
+
+                    v['Pond_Efficiency'] = trapping_efficiency
+                    v['Sediment_Total'] *= (1 - trapping_efficiency)
+
+                    for key, value in v['All_Connected_Segments']['Sediment'].items():
+                        v['All_Connected_Segments']['Sediment'][key] = value * trapping_efficiency
+
+                if v['Child_Node'] is not None:
+                    cost_to_child = v['Distance_To_Child'] * self.data.flowpaths.travel_cost
+                    v['Cost_Required_To_Connect_Child'] = cost_to_child
+
+                    volume_reaching_child = float( np.maximum(v['Runoff_Total'] - cost_to_child, 0))
+
+                    if volume_reaching_child > 0:
+
+                        delivery_ratio = volume_reaching_child / v['Runoff_Total']
+
+                        g[v['Child_Node']]['Parent_Nodes'].append(k)
+                        g[v['Child_Node']]['Ancestor_Nodes'] += v['Ancestor_Nodes'] + [k]
+
+                        # Pass All Connected Road Indices to Child
+                        for key, value in v['All_Connected_Segments']['Indices'].items():
+                            g[v['Child_Node']]['All_Connected_Segments']['Indices'][key] = g[v['Child_Node']]['All_Connected_Segments']['Indices'].get(key, []) + value
+
+                        # Pass All Connected Road Lengths to Child
+                        for key, value in v['All_Connected_Segments']['Length'].items():
+                            g[v['Child_Node']]['All_Connected_Segments']['Length'][key] = g[v['Child_Node']]['All_Connected_Segments']['Length'].get(key, 0) + value
+
+                        # Pass All Connected Road Areas to Child
+                        for key, value in v['All_Connected_Segments']['Area'].items():
+                            g[v['Child_Node']]['All_Connected_Segments']['Area'][key] = g[v['Child_Node']]['All_Connected_Segments']['Area'].get(key, 0) + value
+
+                        # Pass All Connected Road Runoff to Child, Applying V2B
+                        for key, value in v['All_Connected_Segments']['Runoff'].items():
+                            g[v['Child_Node']]['All_Connected_Segments']['Runoff'][key] = g[v['Child_Node']]['All_Connected_Segments']['Runoff'].get(key, 0) + ( value * delivery_ratio)
+
+                        # Pass All Connected Road Sediment to Child, Applying V2B
+                        for key, value in v['All_Connected_Segments']['Sediment'].items():
+                            g[v['Child_Node']]['All_Connected_Segments']['Sediment'][key] = g[v['Child_Node']]['All_Connected_Segments']['Sediment'].get(key, 0) + ( value * delivery_ratio)
+
+            # Append the result to result_graphs
+            self.result_graphs.append( (rainfall_event, g) )
 
 class GraphNode:
     def __init__(
@@ -48,10 +143,13 @@ class GraphNode:
 
             'Pond_Max_Capacity': None,
             'Pond_Used_Capacity': None,
+            'Pond_Efficiency': None,
+            'Sediment_Trapped': None,
 
             'Parent_Nodes': [],
             'Child_Node': None,
             'Distance_To_Child': None,
+            'Cost_Required_To_Connect_Child': None,
 
             'Ancestor_Nodes': []
         }
@@ -64,20 +162,14 @@ class Graph(Model):
         self.G = nx.DiGraph()
 
     # Graph access
-
     def add_node(self, node:GraphNode):
         self.graph[node.index] = node.node
-        self.build_graph()
         pass
-
-    def get_node(self, point:shapely.geometry.Point):
-        return self.graph.get(point)
 
     # run() / helper functions
     def build_graph(self):
-        # Add nodes and edges to the graph
+        self.G = nx.DiGraph()
         for index, node_data in self.graph.items():
-            # Add node with attributes
             self.G.add_node(index, label=node_data)
 
             # Add edge to child if exists
@@ -85,31 +177,15 @@ class Graph(Model):
                 self.G.add_edge(index, node_data['Child_Node'])
 
         try:
-            list(nx.topological_sort(self.G))
+            p = list(nx.topological_sort(self.G))
+
+            new_dict = {}
+            for node in p:
+                new_dict[node] = self.graph[node]
+
+            self.graph = new_dict.copy()
         except Exception as e:
-            raise RuntimeError(e)
-
-        self._pdf_graph_view()
-
-    # Visualize
-    def _pdf_graph_view(self):
-        plt.figure(figsize=(12, 8))
-        pos = nx.spring_layout(self.G, k=0.9, iterations=50)
-
-        nx.draw_networkx_nodes(self.G, pos, node_color='lightblue', 
-                                node_size=3000, alpha=0.8)
-
-        nx.draw_networkx_edges(self.G, pos, edge_color='gray', 
-                                arrows=True, arrowsize=20)
-
-        node_labels = {node: str(node) for node in self.G.nodes()}
-        nx.draw_networkx_labels(self.G, pos, labels=node_labels, 
-                                 font_size=8, font_weight="bold")
-
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig('network_graph.pdf', bbox_inches='tight')
-        plt.close()
+            raise e
 
 class Data(Model):
     def __init__(self, model:Model, roadpath, roadtypepath, drainpath, pondpath, flowpathpath, elevationpath):
@@ -138,7 +214,7 @@ class Data(Model):
         for _, row in self.drains.gdf.iterrows():
             point = row.geometry
             node_type = "D"
-            elevation = row['ELEVATION'][0]
+            elevation = row['ELEVATION']
 
             filtered_roads = self.roads.gdf[self.roads.gdf['DRAIN_IDX'] == point]
             road_type_index = filtered_roads.groupby('TYPE')['index'].apply(list).to_dict()
@@ -158,12 +234,16 @@ class Data(Model):
         for _, row in self.ponds.gdf.iterrows():
             point = row.geometry
             node_type = "P"
-            elevation = row['ELEVATION'][0]
+            elevation = row['ELEVATION']
+            pond_cap = row['MAX_CAP']
+            pond_used = row['USED_CAP']
             child_node, distance_to_child = self.find_downhill_flowpath(point)
 
             node = GraphNode(point=point, node_type=node_type, elevation=elevation)
             node.node['Child_Node'] = child_node
             node.node['Distance_To_Child'] = distance_to_child
+            node.node['Pond_Max_Capacity'] = pond_cap
+            node.node['Pond_Used_Capacity'] = pond_used
 
             self.model.graph.add_node(node=node)
 
@@ -193,8 +273,8 @@ class Data(Model):
                     start = shapely.geometry.Point(path.geometry.coords[0])
                     end = shapely.geometry.Point(path.geometry.coords[-1])
 
-                    start_elev = list(src.sample([(start.x, start.y)]))[0]
-                    end_elev = list(src.sample([(end.x, end.y)]))[0]
+                    start_elev = float(list(src.sample([(start.x, start.y)]))[0][0])
+                    end_elev = float(list(src.sample([(end.x, end.y)]))[0][0])
 
                     # Check if path goes downhill
                     if (start.intersects(point.geometry) and end_elev < point['ELEVATION']) or \
@@ -216,38 +296,29 @@ class Data(Model):
         intersecting_flowpaths = self.flowpaths.gdf[self.flowpaths.gdf.intersects(point)]
         if len(intersecting_flowpaths) == 0: return None, None
 
-        # Read the elevation raster
         with rasterio.open(elevationpath) as elevation_raster:
-            # Function to get elevation of a point
             def get_point_elevation(pt):
                 # Sample the raster at the point's coordinates
-                elevation = list(elevation_raster.sample([(pt.x, pt.y)]))[0][0]
+                elevation = float(list(elevation_raster.sample([(pt.x, pt.y)]))[0][0])
                 return elevation
 
-            # Candidate flowpaths that touch the point
             candidate_flowpaths = []
             for _, flowpath in intersecting_flowpaths.iterrows():
-                # Get start and end points of the flowpath
                 line_coords = list(flowpath.geometry.coords)
                 start_point = shapely.geometry.Point(line_coords[0])
                 end_point = shapely.geometry.Point(line_coords[-1])
 
-                # Get elevations
                 start_elev = get_point_elevation(start_point)
                 end_elev = get_point_elevation(end_point)
 
-                # Check if the point matches either start or end
                 if (start_point.equals(point)) and (start_elev > end_elev):
                     candidate_flowpaths.append((flowpath, end_point))
                 elif (end_point.equals(point)) and (end_elev > start_elev):
                     candidate_flowpaths.append((flowpath, start_point))
 
-            # If multiple or no candidates, raise an exception or handle accordingly
             if len(candidate_flowpaths) != 1:
-                print(f"\n\n\n\n>>>>POINT:{point}\nCADIDATE_FLOWPATHS:{candidate_flowpaths}<<<<")
-                raise ValueError(f"Expected exactly one downhill flowpath, found {len(candidate_flowpaths)}")
+                raise ValueError(f"Expected exactly one downhill flowpath, found {len(candidate_flowpaths)} at {point}")
 
-            # Check for additional intersections at the end point
             end_point = candidate_flowpaths[0][1]
             end_point_buffer = end_point.buffer(0.3)
 
@@ -268,6 +339,14 @@ class Data(Model):
             if not drain_intersections.empty:
                 # Return the existing end point and flowpath length
                 return candidate_flowpaths[0][1], candidate_flowpaths[0][0].geometry.length
+
+            # At this point, we assume this is a termination point because the flowpath doesn't connect to anything
+            # And because this won't exist in any gdb right now, we must create it
+            point = candidate_flowpaths[0][1]
+            node_type = "T"
+            elevation = get_point_elevation(point)
+            node = GraphNode(point=point, node_type=node_type, elevation=elevation)
+            self.model.graph.add_node(node=node)
 
             return candidate_flowpaths[0][1], candidate_flowpaths[0][0].geometry.length
 
@@ -314,7 +393,7 @@ class Data(Model):
                 self.gdf.at[idx, 'INCL_DRAIN'] = True
                 self.gdf.at[idx, 'DRAIN_IDX'] = drain
 
-            # Process segments not directly connected to drains
+            # Process road segments
             unroutable_segments = []
             for idx, road_segment in self.gdf[~self.gdf['INCL_DRAIN']].iterrows():
                 current_segment = road_segment
@@ -350,8 +429,6 @@ class Data(Model):
                 print(f"Total unroutable segment length: {unroutable_length}")
                 print(f"Number of unroutable segments: {len(unroutable_segments)}")
 
-            # self.gdf.to_file("drain_connectivity_analysis.shp")
-
 
     class Drains:
         def __init__(self, drainpath):
@@ -360,12 +437,10 @@ class Data(Model):
 
         def _calculate_elevation(self):
             with rasterio.open(elevationpath) as src:
-                self.gdf['ELEVATION'] = list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))
+                # src.sample() returns a generator, so we call list, 
+                self.gdf['ELEVATION'] = [float(e[0]) for e in list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))]
                 if (null_indexes := [i for i, x in enumerate(self.gdf['ELEVATION']) if x == src.nodata]):
                     raise ValueError(f"Features with null elevation at drain indexes: {null_indexes}")
-
-        def _add_to_graph(self):
-            pass
 
     class Ponds:
         def __init__(self, pondpath):
@@ -374,15 +449,13 @@ class Data(Model):
 
         def _calculate_elevation(self):
             with rasterio.open(elevationpath) as src:
-                self.gdf['ELEVATION'] = list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))
+                self.gdf['ELEVATION'] = [float(e[0]) for e in list(src.sample([(x, y) for x, y in zip(self.gdf["geometry"].x, self.gdf["geometry"].y)]))]
                 if (null_indexes := [i for i, x in enumerate(self.gdf['ELEVATION']) if x == src.nodata]):
                     raise ValueError(f"Features with null elevation at pond indexes: {null_indexes}")
 
-        def _add_to_graph(self):
-            pass
-
     class Flowpaths:
         def __init__(self, flowpathpath):
+            self.travel_cost = json.load(open(configpath))['travel_cost']
             self.gdf = gpd.read_file(flowpathpath)
             self._vd_lines()
 
@@ -394,8 +467,8 @@ class Data(Model):
             start = shapely.geometry.Point(path.geometry.coords[0])
             end = shapely.geometry.Point(path.geometry.coords[-1])
 
-            start_elev = list(elevation_src.sample([(start.x, start.y)]))[0]
-            end_elev = list(elevation_src.sample([(end.x, end.y)]))[0]
+            start_elev = float(list(elevation_src.sample([(start.x, start.y)]))[0][0])
+            end_elev = float(list(elevation_src.sample([(end.x, end.y)]))[0][0])
 
             return (start.intersects(point.geometry) and end_elev < point['ELEVATION']) or \
                    (end.intersects(point.geometry) and start_elev < point['ELEVATION'])
@@ -410,7 +483,7 @@ class Data(Model):
 
 
 roadpath = 'roads.shp'
-roadtypepath = 'roadtypes.json'
+roadtypepath = 'config.json'
 drainpath = 'drains.shp'
 pondpath = 'ponds.shp'
 flowpathpath = 'flowpaths.shp'
@@ -427,11 +500,20 @@ m = Model(
     configpath=configpath
 )
 
+m.run()
 #|%%--%%| <d1C9LohqaR|1eSca5QkZ3>
 
 m.graph.graph
 
-#|%%--%%| <1eSca5QkZ3|mMfRqQPgyA>
+#|%%--%%| <1eSca5QkZ3|d2wTkw5d08>
+
+m.result_graphs
+
+#|%%--%%| <d2wTkw5d08|bnsmGNnBHn>
+
+m.run()
+
+#|%%--%%| <bnsmGNnBHn|mMfRqQPgyA>
 
 
 import graphviz
@@ -439,7 +521,7 @@ import graphviz
 def visualize_node_graph(nodes_dict):
     # Create a new directed graph
     dot = graphviz.Digraph(comment='Node Graph', format='pdf')
-    
+
     # Add nodes to the graph
     for index, node_data in nodes_dict.items():
         # Create a node label with key information
@@ -447,18 +529,18 @@ def visualize_node_graph(nodes_dict):
                      f"Type: {node_data['Type']}\n" \
                      f"Elevation: {node_data['Elevation']}\n" \
                      f"Directly_CS: {node_data['Directly_Connected_Segments']}"
-        
+
         # Use the string representation of the index as the node identifier
         node_id = str(index)
-        
+
         # Add the node to the graph
         dot.node(node_id, node_label)
-        
+
         # Add edge to child if exists
         if node_data['Child_Node'] is not None:
             child_id = str(node_data['Child_Node'])
             dot.edge(node_id, child_id)
-    
+
     # Render the graph
     dot.render('node_graph', view=True)
 
@@ -519,7 +601,6 @@ visualize_node_graph(m.graph.graph)
 #|%%--%%| <i4VxWMoHSx|61WfY9YjYK>
 
 
-import networkx as nx
 import matplotlib.pyplot as plt
 import base64
 from io import BytesIO
@@ -559,7 +640,7 @@ def export_networkx_graph_to_html(nodes_dict, output_file='network_graph.html'):
     plt.close()
 
 # Usage
-export_networkx_graph_to_html(m.graph.graph)
+export_networkx_graph_to_html(m.result_graphs[0])
 
 #|%%--%%| <61WfY9YjYK|POqeFoW0bl>
 
