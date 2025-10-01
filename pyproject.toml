@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "RoadConnect_GODISABIRD"
+version = "0.0.1"
+authors = [
+  { name="Rushi Bhatt", email="therushibhatt@gmail.com" },
+  { name="Rushi Bhatt", email="bhattrushi@utexas.edu" },
+]
+description = "A road runoff and sediment model"
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+# Core dependencies
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "geopandas>=0.13.0",
+    "shapely>=2.0.0",
+]
+
+# Command-line scripts/entry points
+[project.scripts]
+roadconnect = "model.main:main"
+
+[project.urls]
+Homepage = "https://github.com/God-Is-A-Bird/RoadConnect"
+Issues = "https://github.com/God-Is-A-Bird/RoadConnect/issues"
+Source = "https://github.com/God-Is-A-Bird/RoadConnect"
+
+# Setuptools-specific configuration
+[tool.setuptools]
+packages = ["model"]
+package-dir = {"" = "src"}

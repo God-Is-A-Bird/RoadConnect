@@ -1,0 +1,9 @@
+# Ignore Python egg-info directories
+*.egg-info/
+src/*.egg-info/
+
+# Python build and distribution files
+*.pyc
+__pycache__/
+build/
+dist/

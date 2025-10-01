@@ -1,0 +1,19 @@
+{
+    "rainfall_values": [100],
+    "road_types": {
+        "sand": {
+            "runoff_coefficient": 0.11,
+            "erosion_rate": 0.003
+        },
+        "dirt": {
+            "runoff_coefficient": 0.22,
+            "erosion_rate": 4.15
+        },
+        "gravel": {
+            "runoff_coefficient": 0.33,
+            "erosion_rate": 5.35
+        }
+    },
+    "travel_cost": 0
+}
+

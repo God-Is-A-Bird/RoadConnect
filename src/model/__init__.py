@@ -1,0 +1,5 @@
+__version__ = "0.0.1"
+__license__ = "GNU General Public License v3.0"
+__author__ = "Rushi Bhatt"
+__email__ = "therushibhatt [at] gmail [dot] com"
+__secondary_email__ = "bhattrushi [at] utexas [dot] edu"
