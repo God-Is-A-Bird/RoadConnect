@@ -19,10 +19,10 @@ classifiers = [
 
 # Core dependencies
 dependencies = [
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
-    "geopandas>=0.13.0",
-    "shapely>=2.0.0",
+    "numpy>=1.26.4",
+    "pandas>=2.2.3",
+    "geopandas>=1.0.1",
+    "shapely>=2.0.7",
 ]
 
 # Command-line scripts/entry points

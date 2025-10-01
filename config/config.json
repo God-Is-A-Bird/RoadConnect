@@ -1,5 +1,6 @@
 {
     "rainfall_values": [100],
+    "travel_cost": 0,
     "road_types": {
         "sand": {
             "runoff_coefficient": 0.11,
@@ -13,7 +14,6 @@
             "runoff_coefficient": 0.33,
             "erosion_rate": 5.35
         }
-    },
-    "travel_cost": 0
+    }
 }
 
