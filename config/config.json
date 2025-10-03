@@ -1,5 +1,5 @@
 {
-    "rainfall_values": [100],
+    "rainfall_values": [50, 40, 30, 44, 55, 23, 13, 34],
     "travel_cost": 0,
     "road_types": {
         "sand": {
@@ -14,6 +14,12 @@
             "runoff_coefficient": 0.33,
             "erosion_rate": 5.35
         }
+    },
+    "datapaths": {
+        "roads" : "user_data/roads.shp",
+        "flowpaths" : "user_data/flowpaths.shp",
+        "drains" : "user_data/drains.shp",
+        "ponds" : "user_data/ponds.shp",
+        "elevation" : "user_data/elevation.tif"
     }
 }
-

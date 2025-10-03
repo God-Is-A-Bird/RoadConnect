@@ -36,5 +36,5 @@ Source = "https://github.com/God-Is-A-Bird/RoadConnect"
 
 # Setuptools-specific configuration
 [tool.setuptools]
-packages = ["model"]
+packages = ["model", "utils"]
 package-dir = {"" = "src"}
