@@ -70,10 +70,11 @@ def ___pp_calculate_drain_connectivity() -> None:
             current_segment = touching_segments.loc[touching_segments['ELEVATION'].idxmin()]
             visited_segments.add(current_segment.name)
 
+    _gdf.to_file('user_data/roads_w_connectivity.shp' )
     # Log unroutable segments if any exist
     if unroutable_segments:
         unroutable_length = sum(seg.geometry.length for seg in unroutable_segments)
         print(f"\n\nTotal unroutable segment length: {unroutable_length}")
-        print(f"\Number of unroutable segments: {len(unroutable_segments)}")
+        print(f"\nNumber of unroutable segments: {len(unroutable_segments)}")
 
 ___pp_calculate_drain_connectivity()
