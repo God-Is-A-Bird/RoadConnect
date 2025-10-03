@@ -1,5 +1,7 @@
 import os
 import json
+from os.path import isfile
+from pathlib import Path
 from typing import List, Dict, TypedDict
 
 CONFIG_PATH = os.path.join(
@@ -21,12 +23,10 @@ def get_rainfall_values() -> List[float]:
             except (TypeError, ValueError):
                 raise ValueError("rainfall_values must be a list of numbers that can be converted to float")
 
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found at: {CONFIG_PATH}")
     except KeyError:
         raise KeyError("'rainfall_values' not found in the configuration file")
 
-def get_travel_cost() -> float:
+def get_flowpath_travel_cost() -> float:
     try:
         with open(CONFIG_PATH, 'r') as config_file:
             config_data = json.load(config_file)
@@ -47,8 +47,6 @@ def get_travel_cost() -> float:
 
             return travel_cost
 
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found at: {CONFIG_PATH}")
     except KeyError:
         raise KeyError("'travel_cost' not found in the configuration file")
 
@@ -102,7 +100,44 @@ def get_road_types() -> Dict[str, RoadTypeData]:
 
             return validated_road_types
 
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file not found at: {CONFIG_PATH}")
     except KeyError:
         raise KeyError("'road_types' not found in the configuration file")
+
+def __resolve_data_path(key: str) -> Path:
+    try:
+        with open(CONFIG_PATH, 'r') as config_file:
+            config_data = json.load(config_file)
+
+            # Extract path string
+            path_str = config_data['datapaths'][key]
+
+            # Validate type
+            if not isinstance(path_str, str):
+                raise ValueError(f"{key} datapath must be a string")
+
+            # Convert to Path
+            path = Path(path_str)
+
+            # Validate existence
+            if path.is_file():
+                return path
+            else:
+                raise FileNotFoundError(f"{key} file:{path} does not exist!")
+
+    except KeyError:
+        raise KeyError(f"'datapaths' -> {key} not found in the configuration file")
+
+def resolve_roads_data_path() -> Path:
+    return __resolve_data_path('roads')
+
+def resolve_flowpaths_data_path() -> Path:
+    return __resolve_data_path('flowpaths')
+
+def resolve_drains_data_path() -> Path:
+    return __resolve_data_path('drains')
+
+def resolve_ponds_data_path() -> Path:
+    return __resolve_data_path('ponds')
+
+def resolve_elevation_data_path() -> Path:
+    return __resolve_data_path('elevation')
