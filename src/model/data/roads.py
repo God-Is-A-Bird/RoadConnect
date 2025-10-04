@@ -22,6 +22,7 @@ def __vd_length_and_area() -> None:
 __vd_index()
 __vd_road_types()
 __vd_length_and_area()
+# TODO: Add slope to attribute for erosion
 
 # Pre-Processing Functions
 

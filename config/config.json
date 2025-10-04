@@ -1,6 +1,6 @@
 {
     "rainfall_values": [50, 40, 30, 44, 55, 23, 13, 34],
-    "travel_cost": 0,
+    "travel_cost": 0, # Volume to breakthrough
     "road_types": {
         "sand": {
             "runoff_coefficient": 0.11,
@@ -13,8 +13,8 @@
         "gravel": {
             "runoff_coefficient": 0.33,
             "erosion_rate": 5.35
-        }
-    },
+        },
+    }, #TODO: Copy road types from paper
     "datapaths": {
         "roads" : "user_data/roads.shp",
         "flowpaths" : "user_data/flowpaths.shp",
