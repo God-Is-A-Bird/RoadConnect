@@ -21,11 +21,11 @@ def get_nodes() -> List[GraphNode]:
         node = GraphNode(point=point, node_type=node_type, elevation=elevation)
 
         pond_max_capacity = row['MAX_CAP']
-        if not isinstance(pond_max_capacity, float): raise ValueError(f"Invalid pond MAX_CAP at {point}, expected float type, got {type(pond_max_capacity)}")
+        if not isinstance(pond_max_capacity, float | int): raise ValueError(f"Invalid pond MAX_CAP at {point}, expected float or int type, got {type(pond_max_capacity)}")
         node.pond_max_capacity = pond_max_capacity
 
         pond_used_capacity = row['USED_CAP']
-        if not isinstance(pond_used_capacity, float): raise ValueError(f"Invalid pond USED_CAP at {point}, expected float type, got {type(pond_used_capacity)}")
+        if not isinstance(pond_used_capacity, float | int): raise ValueError(f"Invalid pond USED_CAP at {point}, expected float or int type, got {type(pond_used_capacity)}")
         node.pond_used_capacity = pond_used_capacity
 
         child_node, distance_to_child = flowpaths.trace_drainage_endpoint(point)

@@ -2,21 +2,39 @@
 from typing import Dict, List
 from utils import config
 from model import graph
-import shapely
+import networkx as nx
 from model import data
+from tqdm import tqdm
+from copy import deepcopy
 
 class Model:
     def __init__(self) -> None:
-        # Load values from configuration file
-        self.rainfall_values : List[float] = config.get_rainfall_values()
-        self.floawpath_travel_cost : float = config.get_flowpath_travel_cost()
-        self.road_types : Dict[str, config.RoadTypeData] = config.get_road_types()
-
-        self.base_graph = graph.Graph()
-
         # TODO: Check that all CRS match
+        self.load_config_values()
+        self.generate_base_graph()
 
-        self.base_graph.add_node( node=graph.GraphNode(point=shapely.geometry.Point(0,0), node_type=graph.NodeType.DRAIN, elevation=0.0), childNodePoint=shapely.geometry.Point(1,1), distanceToChild=2 )
+        self.run()
+        pass
 
-        self.base_graph.add_node( node=graph.GraphNode(point=shapely.geometry.Point(1,1), node_type=graph.NodeType.DRAIN, elevation=0.0), childNodePoint=shapely.geometry.Point(2,2), distanceToChild=1 )
+    def load_config_values(self):
+        # Load values from configuration file
+        self.rainfall_events: List[float] = config.get_rainfall_values()
 
+    def generate_base_graph(self):
+        # Generate base graph
+        self.base_graph = graph.Graph()
+        self.base_graph.add_nodes(data.drains.get_nodes())
+        self.base_graph.add_nodes(data.ponds.get_nodes())
+
+    def run(self) -> List[nx.DiGraph]:
+        results: List[nx.DiGraph] = []
+        processing_order = self.base_graph.get_topological_order()
+
+        for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
+            g = deepcopy(self.base_graph)
+            g.prepare_graph(rainfall_event_total)
+
+            for node in processing_order:
+                g.process_node(node)
+
+            g.print()
