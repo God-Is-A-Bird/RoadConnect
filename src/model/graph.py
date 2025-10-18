@@ -18,9 +18,25 @@ class ConnectedSegments:
     runoff: Dict[str, float] = field(default_factory=dict)
     sediment: Dict[str, float] = field(default_factory=dict)
 
+# Pond-specific properties
+@dataclass
+class PondInformation:
+    max_capacity: float
+    used_capacity: float
+
+    @property
+    def available_capacity(self) -> float:
+        return self.max_capacity - self.used_capacity
+
+    # Computed Values
+    efficiency: float | None = None
+    trapped_sediment: float | None = None
+    trapped_runoff: float | None = None
+
+
 @dataclass
 class GraphNode:
-    point: shapely.geometry.Point
+    point: shapely.geometry.point.Point
     node_type: NodeType
     elevation: float
 
@@ -30,23 +46,17 @@ class GraphNode:
     # All Connected Segments
     all_connected_segments: ConnectedSegments = field(default_factory=ConnectedSegments)
 
-    # Runoff and Sediment Totals
-    runoff_total: float | None = None
-    sediment_total: float | None = None
+    # Node Specific Data
+    pond: PondInformation | None = None
 
-    # Pond-specific properties
-    pond_max_capacity: float | None = None
-    pond_used_capacity: float | None = None
-    pond_efficiency: float | None = None
-    sediment_trapped: float | None = None
+    # Runoff and Sediment Totals
+    total_runoff: float | None = None
+    total_sediment: float | None = None
 
     # Node Relationships
-    parent_nodes: List[shapely.geometry.Point] = field(default_factory=list)
-    child_node: shapely.geometry.Point | None = None
+    child: shapely.geometry.point.Point | None = None
     distance_to_child: float | None = None
-    cost_required_to_connect_child: float | None = None
-
-    ancestor_nodes: List[shapely.geometry.Point] = field(default_factory=list)
+    cost_to_connect_child: float | None = None
 
 class Graph:
     def __init__(self) -> None:
@@ -58,7 +68,7 @@ class Graph:
 
     def conditionally_add_provisional_node(
         self,
-        point: shapely.geometry.Point,
+        point: shapely.geometry.point.Point,
     ) -> None:
 
         from .data import elevation
@@ -71,14 +81,14 @@ class Graph:
         self,
         node: GraphNode,
     ) -> None:
-        if bool(node.child_node) != bool(node.distance_to_child):
+        if bool(node.child) != bool(node.distance_to_child):
             raise ValueError("child_node and distance_to_child must either both be None or non-None")
 
         self.__G.add_node(node.point, nodedata=node)
 
-        if node.child_node is not None:
-            self.conditionally_add_provisional_node(node.child_node)
-            self.__G.add_edge(node.point, node.child_node, weight=node.distance_to_child)
+        if node.child is not None:
+            self.conditionally_add_provisional_node(node.child)
+            self.__G.add_edge(node.point, node.child, weight=node.distance_to_child)
 
     def add_nodes(
         self,
@@ -109,11 +119,16 @@ class Graph:
 
         self.__process_directly_connected_segments(nodedata.directly_connected_segments)
         self.__process_all_connected_segments(nodedata)
+        if nodedata.node_type == NodeType.POND: self.__process_pond_node(nodedata)
 
-        nodedata.runoff_total = sum( nodedata.all_connected_segments.runoff.values() )
-        nodedata.sediment_total = sum( nodedata.all_connected_segments.sediment.values() )
+        nodedata.total_runoff = sum( nodedata.all_connected_segments.runoff.values() )
+        nodedata.total_sediment = sum( nodedata.all_connected_segments.sediment.values() )
 
-
+        if nodedata.child is not None:
+            self.__process_child_node(
+                parent_node_data=nodedata,
+                child_node_data=self.__G.nodes[nodedata.child]['nodedata']
+            )
 
     def __process_directly_connected_segments(self, d_conn_seg: ConnectedSegments):
 
@@ -146,16 +161,45 @@ class Graph:
             nodedata.all_connected_segments.sediment[k] = nodedata.all_connected_segments.sediment.get(k, 0) + v
 
     def __process_pond_node(self, nodedata: GraphNode):
-        # TODO: I need to clarify that when we're calculating the pond eff, is the runoff the total from before or after subtracting the pond volume
-        if not nodedata.runoff_total: return # runoff_total must be calculated before
-        if not nodedata.sediment_total: return # sediment_total must be calculated before
-        if not nodedata.runoff_total > 0: return # Early return if no runoff
-        if not nodedata.pond_max_capacity or not nodedata.pond_used_capacity: raise ValueError(f"Pond {nodedata.point} has no 'MAX_CAP' and 'USED_CAP' attribute!")
+        # TODO: Get the bulk density of sediments to update used_capacity between rainfall events
 
-        nodedata.pond_efficiency = float(np.clip(
-            -22 + ( ( 119 * ( ( nodedata.pond_max_capacity - nodedata.pond_used_capacity ) / nodedata.runoff_total ) ) / ( 0.012 + 1.02 * ((nodedata.pond_max_capacity - nodedata.pond_used_capacity) / nodedata.runoff_total ) ) ),
-            0, # Minimum Efficiency
-            100 # Max Efficiency
-        ) / 100) # Turn to percent
+        if not nodedata.pond: raise ValueError(f"Pond node {nodedata.point} does not have have a pond structure!") # This should never be the case
+        if not nodedata.total_runoff: return # total_runoff must be calculated before
+        if not nodedata.total_sediment: return # total_sediment must be calculated before
+        if not nodedata.total_runoff > 0: return # Early return if no runoff
 
-        nodedata.sediment_trapped = nodedata.sediment_total * nodedata.pond_efficiency
+        # Doesn't get used anywhere but I want this value in the output graph
+        nodedata.pond.trapped_runoff = min(nodedata.pond.max_capacity, nodedata.total_runoff)
+
+        # Don't worry, this can't be negative because of the calculation above
+        runoff_out = nodedata.total_runoff - nodedata.pond.trapped_runoff
+
+        if runoff_out == 0:
+           nodedata.pond.efficiency = 1.0
+        else:
+            nodedata.pond.efficiency = float(np.clip(
+                -22 + ( ( 119 * ( nodedata.pond.available_capacity / nodedata.total_runoff ) ) / ( 0.012 + 1.02 * (nodedata.pond.available_capacity / nodedata.total_runoff ) ) ),
+                0, # Minimum Efficiency
+                100 # Max Efficiency
+            ) / 100) # Convert to percent
+
+        nodedata.pond.trapped_sediment = nodedata.total_sediment * nodedata.pond.efficiency
+
+    def __process_child_node(self, parent_node_data: GraphNode, child_node_data: GraphNode) -> None:
+        if parent_node_data.total_runoff == None or parent_node_data.cost_to_connect_child == None: raise ValueError(f"{parent_node_data.node_type} {parent_node_data.point} is incomplete to compute child node (missing total_runoff and cost_to_connect_child)")
+
+        match parent_node_data.node_type:
+            case NodeType.POND:
+                if parent_node_data.pond == None or parent_node_data.pond.trapped_runoff == None: raise ValueError(f"Pond node {parent_node_data.point} is incomplete to compute child node (missing pond.trapped_runoff)")
+
+                volume_reaching_child = parent_node_data.total_runoff - parent_node_data.pond.trapped_runoff - parent_node_data.cost_to_connect_child
+
+            case _:
+                volume_reaching_child = parent_node_data.total_runoff - parent_node_data.cost_to_connect_child
+
+        if volume_reaching_child <= 0: return
+
+        # NOTE: What if for connected segmetns, we stored the values for each road type as a ratio? It'd make future calculations much easier
+
+    def __calculate_delivery_ratio(self, volume_reaching_child: float, total_runoff: float) -> float:
+        return volume_reaching_child / total_runoff

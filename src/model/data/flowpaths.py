@@ -1,3 +1,4 @@
+from typing import Tuple
 import geopandas as gpd
 from pathlib import Path
 
@@ -6,6 +7,7 @@ from utils import config
 from . import roads, elevation
 
 path: Path = config.resolve_flowpaths_data_path()
+__flowpath_travel_cost = config.get_flowpath_travel_cost()
 _gdf = gpd.read_file(path)
 
 def __vd_lines() -> None:
@@ -20,11 +22,11 @@ __vd_lines()
 
 
 
-def trace_drainage_endpoint(reference_point: shapely.geometry.Point):
+def trace_drainage_endpoint(reference_point: shapely.geometry.Point) -> Tuple[shapely.geometry.point.Point | None, float | None, float | None] :
     # Find flowpaths intersecting with the reference point
     intersecting_flowpaths = _gdf[_gdf.intersects(reference_point)]
     if len(intersecting_flowpaths) == 0:
-        return None, None
+        return None, None, None
 
     # Identify candidate downhill flowpaths
     candidate_flowpaths = []
@@ -58,6 +60,6 @@ def trace_drainage_endpoint(reference_point: shapely.geometry.Point):
     road_intersections = roads._gdf[roads._gdf.intersects(terminal_point_buffer)]
     if not road_intersections.empty:
         # Return the DRAIN_IDX of the intersecting road segment
-        return road_intersections.iloc[0]['DRAIN_IDX'], selected_flowpath.geometry.length
+        return road_intersections.iloc[0]['DRAIN_IDX'], selected_flowpath.geometry.length, selected_flowpath.geometry.length * __flowpath_travel_cost
 
-    return terminal_point, selected_flowpath.geometry.length
+    return terminal_point, selected_flowpath.geometry.length, selected_flowpath.geometry.length * __flowpath_travel_cost
