@@ -7,5 +7,7 @@ from utils import config
 path: Path = config.resolve_elevation_data_path()
 __src = rasterio.open(path)
 
+# TODO: I need to add a function that smoothens the elevation profile of the input file
+
 def sample_point(point: shapely.geometry.Point) -> float:
     return float(list(__src.sample( [point.xy] ))[0][0])

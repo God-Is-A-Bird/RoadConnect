@@ -5,34 +5,119 @@ import shapely.geometry
 import networkx as nx
 import numpy as np
 
+from utils import funcs
+
 class NodeType(Enum):
-    DRAIN = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
+    ROAD_DRAIN = 1
+    DRAI = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
     POND = 2
     TERMINATION = 3
 
 @dataclass
-class ConnectedSegments:
-    indices: Dict[str, List[int]] = field(default_factory=dict)
-    length: Dict[str, float] = field(default_factory=dict)
-    area: Dict[str, float] = field(default_factory=dict)
-    runoff: Dict[str, float] = field(default_factory=dict)
-    sediment: Dict[str, float] = field(default_factory=dict)
+class RoadInformation:
 
-# Pond-specific properties
+    # NOTE: Inherited
+    _ancestor_indices: Dict[str, List[int]] = field(default_factory=dict)
+    _ancestor_length: Dict[str, float] = field(default_factory=dict)
+    _ancestor_area: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Local
+    _local_indices: Dict[str, List[int]] = field(default_factory=dict)
+    _local_length: Dict[str, float] = field(default_factory=dict)
+    _local_area: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Inherited + Local
+    @property
+    def indices(self) -> Dict[str, List[int]]: return funcs.combine_dict_list(self._ancestor_indices, self._local_indices)
+
+    @property
+    def length(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor_length, self._local_length)
+
+    @property
+    def area(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor_area, self._local_area)
+
+@dataclass
+class RunoffInformation:
+
+    # NOTE: Inherited
+    _ancestor: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Local
+    _local: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Inherited + Local
+    @property
+    def total(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor, self._local)
+    @property
+    def sum(self) -> float: return funcs.sum_dict(self.total)
+
+@dataclass
+class SedimentInformation:
+
+    # NOTE: Inherited
+    _ancestor: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Local
+    _local: Dict[str, float] = field(default_factory=dict)
+
+    # NOTE: Inherited + Local
+    @property
+    def total(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor, self._local)
+    @property
+    def sum(self) -> float: return funcs.sum_dict(self.total)
+
 @dataclass
 class PondInformation:
     max_capacity: float
     used_capacity: float
 
+    _runoff_in: float | None = None
+    _sediment_in: float | None = None
+
     @property
-    def available_capacity(self) -> float:
-        return self.max_capacity - self.used_capacity
+    def _available_capacity(self) -> float: return self.max_capacity - self.used_capacity
 
-    # Computed Values
-    efficiency: float | None = None
-    trapped_sediment: float | None = None
-    trapped_runoff: float | None = None
+    @property
+    def _trapped_runoff(self) -> float: 
+        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+        return min(self._available_capacity, self._runoff_in)
 
+    @property
+    def _runoff_out(self) -> float: 
+        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+        return self._runoff_in - self._trapped_runoff
+
+    @property
+    def runoff_percent_difference(self) -> float:
+        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+        return funcs.percent_difference(self._runoff_out, self._runoff_in)
+
+    @property
+    def _efficiency(self) -> float:
+        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+
+        if self._runoff_out == 0: return 1.0
+        else:
+            return float(np.clip(
+                -22 + ( ( 119 * ( self._available_capacity / self._runoff_in ) ) / ( 0.012 + 1.02 * (self._available_capacity / self._runoff_in ) ) ),
+                0, # Minimum Efficiency
+                100 # Max Efficiency
+            ) / 100) # Convert to percent
+
+    @property
+    def _trapped_sediment(self) -> float: 
+        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+        return self._sediment_in * self._efficiency
+
+    @property
+    def _sediment_out(self) -> float:
+        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+        return self._sediment_in - self._trapped_sediment
+
+    @property
+    def sediment_percent_difference(self) -> float:
+        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+        return funcs.percent_difference(self._sediment_out, self._sediment_in)
 
 @dataclass
 class GraphNode:
@@ -40,23 +125,19 @@ class GraphNode:
     node_type: NodeType
     elevation: float
 
-    # Directly Connected Segments
-    directly_connected_segments: ConnectedSegments = field(default_factory=ConnectedSegments)
-
-    # All Connected Segments
-    all_connected_segments: ConnectedSegments = field(default_factory=ConnectedSegments)
-
-    # Node Specific Data
+    # Information
+    road: RoadInformation = field(default_factory=RoadInformation)
+    runoff: RunoffInformation = field(default_factory=RunoffInformation)
+    sediment: SedimentInformation = field(default_factory=SedimentInformation)
     pond: PondInformation | None = None
-
-    # Runoff and Sediment Totals
-    total_runoff: float | None = None
-    total_sediment: float | None = None
 
     # Node Relationships
     child: shapely.geometry.point.Point | None = None
     distance_to_child: float | None = None
     cost_to_connect_child: float | None = None
+    volume_reaching_child: float | None = None
+    sediment_reaching_child: float | None = None
+    percent_reaching_child: float | None = None
 
 class Graph:
     def __init__(self) -> None:
@@ -66,6 +147,9 @@ class Graph:
         for node, data in self.__G.nodes(data=True):
             print(f"Node {node}: {data.get('nodedata')}")
 
+    # This function exists because when populating the graph,
+    # it is not garunteed that the child node exists so
+    # we add a provisional node.
     def conditionally_add_provisional_node(
         self,
         point: shapely.geometry.point.Point,
@@ -111,18 +195,15 @@ class Graph:
 
         self.__G.clear_edges() # We're only going to add edges if runoff > cost
 
-    def process_node(self, point: shapely.geometry.point.Point):
+    def process_node(self, point: shapely.geometry.point.Point) -> None:
         nodedata = self.__G.nodes[point]['nodedata']
 
-        if not isinstance(nodedata, GraphNode):
-            raise ValueError("Node in processing list is somehow not in the graph, this should never happen!")
+        if not isinstance(nodedata, GraphNode): raise ValueError("Node in processing list is somehow not in the graph, this should never happen!")
 
-        self.__process_directly_connected_segments(nodedata.directly_connected_segments)
-        self.__process_all_connected_segments(nodedata)
-        if nodedata.node_type == NodeType.POND: self.__process_pond_node(nodedata)
-
-        nodedata.total_runoff = sum( nodedata.all_connected_segments.runoff.values() )
-        nodedata.total_sediment = sum( nodedata.all_connected_segments.sediment.values() )
+        match nodedata.node_type:
+            case NodeType.POND: self.__process_pond_node(nodedata)
+            case _:
+                nodedata.runoff.
 
         if nodedata.child is not None:
             self.__process_child_node(
@@ -130,76 +211,35 @@ class Graph:
                 child_node_data=self.__G.nodes[nodedata.child]['nodedata']
             )
 
-    def __process_directly_connected_segments(self, d_conn_seg: ConnectedSegments):
-
-        # Process Runoff
-        d_conn_seg.runoff = { key: value * (self.rainfall_event_size/1000) * self.road_types[key]['runoff_coefficient'] for key, value in d_conn_seg.area.items() }
-
-        # Process Sediment
-        d_conn_seg.sediment = { key: (self.rainfall_event_size/1000) * self.road_types[key]['erosion_rate'] * d_conn_seg.area[key] for key, value in d_conn_seg.runoff.items() if value > 0 }
-
-    def __process_all_connected_segments(self, nodedata: GraphNode ) -> None:
-
-        # Process Indices
-        for k, v in nodedata.directly_connected_segments.indices.items():
-            nodedata.all_connected_segments.indices[k] = nodedata.all_connected_segments.indices.get(k, []) + v
-
-        # Process Length
-        for k, v in nodedata.directly_connected_segments.length.items():
-            nodedata.all_connected_segments.length[k] = nodedata.all_connected_segments.length.get(k, 0) + v
-
-        # Process Area
-        for k, v in nodedata.directly_connected_segments.area.items():
-            nodedata.all_connected_segments.area[k] = nodedata.all_connected_segments.area.get(k, 0) + v
-
-        # Process Runoff
-        for k, v in nodedata.directly_connected_segments.runoff.items():
-            nodedata.all_connected_segments.runoff[k] = nodedata.all_connected_segments.runoff.get(k, 0) + v
-
-        # Process Sediment
-        for k, v in nodedata.directly_connected_segments.sediment.items():
-            nodedata.all_connected_segments.sediment[k] = nodedata.all_connected_segments.sediment.get(k, 0) + v
-
-    def __process_pond_node(self, nodedata: GraphNode):
+    def __process_pond_node(self, nodedata: GraphNode) -> None:
         # TODO: Get the bulk density of sediments to update used_capacity between rainfall events
 
         if not nodedata.pond: raise ValueError(f"Pond node {nodedata.point} does not have have a pond structure!") # This should never be the case
-        if not nodedata.total_runoff: return # total_runoff must be calculated before
-        if not nodedata.total_sediment: return # total_sediment must be calculated before
-        if not nodedata.total_runoff > 0: return # Early return if no runoff
+        if (funcs.sum_dict(nodedata.runoff._local) != 0) or (funcs.sum_dict(nodedata.sediment._local) != 0): raise ValueError(f"Expected [runoff/sediment]._local to be zero for pond node {nodedata.point}.") # This should also never be the case!
 
-        # Doesn't get used anywhere but I want this value in the output graph
-        nodedata.pond.trapped_runoff = min(nodedata.pond.max_capacity, nodedata.total_runoff)
+        # I don't like how I have this implemented but I don't know how else to do it right now...
+        nodedata.pond._runoff_in = nodedata.runoff.sum
+        nodedata.pond._sediment_in = nodedata.sediment.sum
 
-        # Don't worry, this can't be negative because of the calculation above
-        runoff_out = nodedata.total_runoff - nodedata.pond.trapped_runoff
-
-        if runoff_out == 0:
-           nodedata.pond.efficiency = 1.0
-        else:
-            nodedata.pond.efficiency = float(np.clip(
-                -22 + ( ( 119 * ( nodedata.pond.available_capacity / nodedata.total_runoff ) ) / ( 0.012 + 1.02 * (nodedata.pond.available_capacity / nodedata.total_runoff ) ) ),
-                0, # Minimum Efficiency
-                100 # Max Efficiency
-            ) / 100) # Convert to percent
-
-        nodedata.pond.trapped_sediment = nodedata.total_sediment * nodedata.pond.efficiency
+        nodedata.runoff._local = funcs.scale_dict(nodedata.runoff._ancestor, nodedata.pond.runoff_percent_difference)
+        nodedata.sediment._local = funcs.scale_dict(nodedata.sediment._ancestor, nodedata.pond.sediment_percent_difference)
 
     def __process_child_node(self, parent_node_data: GraphNode, child_node_data: GraphNode) -> None:
-        if parent_node_data.total_runoff == None or parent_node_data.cost_to_connect_child == None: raise ValueError(f"{parent_node_data.node_type} {parent_node_data.point} is incomplete to compute child node (missing total_runoff and cost_to_connect_child)")
+        if not parent_node_data.cost_to_connect_child: raise ValueError(f"{parent_node_data.node_type} {parent_node_data.point} is incomplete to compute child node (missing cost_to_connect_child)")
 
-        match parent_node_data.node_type:
-            case NodeType.POND:
-                if parent_node_data.pond == None or parent_node_data.pond.trapped_runoff == None: raise ValueError(f"Pond node {parent_node_data.point} is incomplete to compute child node (missing pond.trapped_runoff)")
+        parent_node_data.volume_reaching_child = max(0, parent_node_data.runoff.sum - parent_node_data.cost_to_connect_child)
+        if parent_node_data.volume_reaching_child == 0: return
+        else: self.__G.add_edge(parent_node_data.point, parent_node_data.child, weight=parent_node_data.distance_to_child)
 
-                volume_reaching_child = parent_node_data.total_runoff - parent_node_data.pond.trapped_runoff - parent_node_data.cost_to_connect_child
+        parent_node_data.percent_reaching_child = parent_node_data.volume_reaching_child / parent_node_data.runoff.sum
+        parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child 
 
-            case _:
-                volume_reaching_child = parent_node_data.total_runoff - parent_node_data.cost_to_connect_child
+        child_node_data.runoff._ancestor = funcs.combine_dict(
+            child_node_data.runoff._ancestor,
+            funcs.scale_dict(parent_node_data.runoff.total, parent_node_data.percent_reaching_child)
+        )
 
-        if volume_reaching_child <= 0: return
-
-        # NOTE: What if for connected segmetns, we stored the values for each road type as a ratio? It'd make future calculations much easier
-
-    def __calculate_delivery_ratio(self, volume_reaching_child: float, total_runoff: float) -> float:
-        return volume_reaching_child / total_runoff
+        child_node_data.sediment._ancestor = funcs.combine_dict(
+            child_node_data.sediment._ancestor,
+            funcs.scale_dict(parent_node_data.sediment.total, parent_node_data.percent_reaching_child)
+        )
