@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "RoadConnect_GODISABIRD"
 version = "0.0.1"
 authors = [
-  { name="Rushi Bhatt", email="therushibhatt@gmail.com" },
-  { name="Rushi Bhatt", email="bhattrushi@utexas.edu" },
+  { name="Rushi Bhatt", email="therushibhatt [ AT@ ] gmail [ DOT. ] com" },
+  { name="Rushi Bhatt", email="bhattrushi [ AT@ ] utexas [ DOT. ] edu" },
 ]
 description = "A road runoff and sediment model"
 readme = "README.md"
