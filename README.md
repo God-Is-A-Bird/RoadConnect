@@ -15,7 +15,7 @@ The main program can currently:
 * **Calculate Travel Cost:** The model accounts for the "volume-to-breakthrough" cost for flow traveling over non-road surfaces (flowpaths).
 
 ### Current Input Requirements
-The model currently requires all data to be pre-processed and provided in the correct format, as specified in the configuration file. For example, road shapefiles **must** already be segmented and include attributes for `ELEVATION` and `TYPE`.
+The model currently requires all data to be pre-processed and provided in the correct format, as specified in the configuration file. For example, road shapefiles **must** already be segmented and include attributes for `ELEVATION`, `AREA`, and `TYPE`. `ELEVATION` and `AREA` will be automated in the near future.
 
 -----
 
