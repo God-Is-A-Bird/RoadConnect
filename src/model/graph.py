@@ -5,11 +5,10 @@ import shapely.geometry
 import networkx as nx
 import numpy as np
 
-from utils import funcs
+from utils import funcs, config
 
 class NodeType(Enum):
-    ROAD_DRAIN = 1
-    DRAI = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
+    DRAIN = 1 # Anywhere you have runoff converging (i.e., road drains and converging flowpaths)
     POND = 2
     TERMINATION = 3
 
@@ -51,6 +50,17 @@ class RunoffInformation:
     @property
     def sum(self) -> float: return funcs.sum_dict(self.total)
 
+    def _calculate_local_runoff(self, area: Dict[str, float], rainfall_amount: float, coefficients: Dict[str, config.RoadTypeData]) -> None:
+
+        for surface_type, surface_area in area.items():
+            road_type_data: config.RoadTypeData = coefficients[surface_type] # The reason I don't have any error handling here is because I check to make sure that all road types exist in data/roads.py with __vd_road_types()
+
+            # Calculate runoff volume: Area * Rainfall * Runoff Coefficient
+            # Assumes rainfall is in mm and area is in square meters
+            runoff_volume = surface_area * (rainfall_amount / 1000) * road_type_data['runoff_coefficient']
+
+            self._local[surface_type] = runoff_volume
+
 @dataclass
 class SedimentInformation:
 
@@ -65,6 +75,17 @@ class SedimentInformation:
     def total(self) -> Dict[str, float]: return funcs.combine_dict(self._ancestor, self._local)
     @property
     def sum(self) -> float: return funcs.sum_dict(self.total)
+
+    def _calculate_local_sediment(self, area: Dict[str, float], rainfall_amount: float, coefficients: Dict[str, config.RoadTypeData]) -> None:
+
+        for surface_type, surface_area in area.items():
+            road_type_data: config.RoadTypeData = coefficients[surface_type] # The reason I don't have any error handling here is because I check to make sure that all road types exist in data/roads.py with __vd_road_types()
+
+            # Calculate sediment mass: Area * Rainfall * Erosion Coefficient
+            # Assumes rainfall is in mm and area is in square meters
+            sediment_mass = surface_area * (rainfall_amount / 1000) * road_type_data['erosion_rate']
+
+            self._local[surface_type] = sediment_mass
 
 @dataclass
 class PondInformation:
@@ -192,7 +213,7 @@ class Graph:
         self.flowpath_travel_cost: float = config.get_flowpath_travel_cost()
         self.road_types: Dict[str, config.RoadTypeData] = config.get_road_types()
         self.rainfall_event_size = rainfall_event_size
-
+ 
         self.__G.clear_edges() # We're only going to add edges if runoff > cost
 
     def process_node(self, point: shapely.geometry.point.Point) -> None:
@@ -200,10 +221,22 @@ class Graph:
 
         if not isinstance(nodedata, GraphNode): raise ValueError("Node in processing list is somehow not in the graph, this should never happen!")
 
+        nodedata.runoff._calculate_local_runoff(
+            nodedata.road._local_area,
+            self.rainfall_event_size,
+            self.road_types
+        )
+
+        nodedata.sediment._calculate_local_sediment(
+            nodedata.road._local_area,
+            self.rainfall_event_size,
+            self.road_types
+        )
+
         match nodedata.node_type:
             case NodeType.POND: self.__process_pond_node(nodedata)
             case _:
-                nodedata.runoff.
+               pass
 
         if nodedata.child is not None:
             self.__process_child_node(
@@ -233,6 +266,21 @@ class Graph:
 
         parent_node_data.percent_reaching_child = parent_node_data.volume_reaching_child / parent_node_data.runoff.sum
         parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child 
+
+        child_node_data.road._ancestor_indices = funcs.combine_dict_list(
+            child_node_data.road._ancestor_indices,
+            parent_node_data.road.indices
+        )
+
+        child_node_data.road._ancestor_length = funcs.combine_dict(
+            child_node_data.road._ancestor_length,
+            parent_node_data.road.length
+        )
+
+        child_node_data.road._ancestor_area = funcs.combine_dict(
+            child_node_data.road._ancestor_area,
+            parent_node_data.road.area
+        )
 
         child_node_data.runoff._ancestor = funcs.combine_dict(
             child_node_data.runoff._ancestor,
