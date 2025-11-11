@@ -25,12 +25,15 @@ def get_nodes() -> List[GraphNode]:
         )
 
         max_capacity = row['MAX_CAP']
-        if not isinstance(max_capacity, float | int): raise ValueError(f"Invalid pond MAX_CAP at {point}, expected float or int type, got {type(max_capacity)}")
+        if not isinstance(max_capacity, float | int):
+            raise ValueError(f"Invalid pond MAX_CAP at {point}, expected float or int type, got {type(max_capacity)}")
 
         used_capacity = row['USED_CAP']
-        if not isinstance(used_capacity, float | int): raise ValueError(f"Invalid pond USED_CAP at {point}, expected float or int type, got {type(used_capacity)}")
+        if not isinstance(used_capacity, float | int):
+            raise ValueError(f"Invalid pond USED_CAP at {point}, expected float or int type, got {type(used_capacity)}")
 
-        if used_capacity > max_capacity: raise ValueError(f"Pond {point} has 'USED_CAP' > 'MAX_CAP'")
+        if used_capacity > max_capacity:
+            raise ValueError(f"Pond {point} has 'USED_CAP' > 'MAX_CAP'")
 
         node.pond = PondInformation(
             max_capacity=max_capacity,

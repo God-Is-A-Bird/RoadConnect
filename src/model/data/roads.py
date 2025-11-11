@@ -13,7 +13,8 @@ def __vd_index() -> None:
 
 def __vd_road_types() -> None:
     unknown_types = set(_gdf['TYPE']) - set(config.get_road_types())
-    if unknown_types: raise ValueError(f"Unknown road types in shapefile: {unknown_types}")
+    if unknown_types:
+        raise ValueError(f"Unknown road types in shapefile: {unknown_types}")
 
 def __vd_length_and_area() -> None:
     if (zero_indices := [idx for idx, (length, area) in enumerate(zip(_gdf['LENGTH'], _gdf['AREA'])) if length <= 0 or area <= 0]):

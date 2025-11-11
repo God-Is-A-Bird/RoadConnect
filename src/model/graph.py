@@ -99,25 +99,30 @@ class PondInformation:
     def _available_capacity(self) -> float: return self.max_capacity - self.used_capacity
 
     @property
-    def _trapped_runoff(self) -> float: 
-        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+    def _trapped_runoff(self) -> float:
+        if self._runoff_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
         return min(self._available_capacity, self._runoff_in)
 
     @property
-    def _runoff_out(self) -> float: 
-        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+    def _runoff_out(self) -> float:
+        if self._runoff_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
         return self._runoff_in - self._trapped_runoff
 
     @property
     def runoff_percent_difference(self) -> float:
-        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+        if self._runoff_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
         return funcs.percent_difference(self._runoff_out, self._runoff_in)
 
     @property
     def _efficiency(self) -> float:
-        if self._runoff_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
+        if self._runoff_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _runoff_in")
 
-        if self._runoff_out == 0: return 1.0
+        if self._runoff_out == 0:
+            return 1.0
         else:
             return float(np.clip(
                 -22 + ( ( 119 * ( self._available_capacity / self._runoff_in ) ) / ( 0.012 + 1.02 * (self._available_capacity / self._runoff_in ) ) ),
@@ -126,18 +131,21 @@ class PondInformation:
             ) / 100) # Convert to percent
 
     @property
-    def _trapped_sediment(self) -> float: 
-        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+    def _trapped_sediment(self) -> float:
+        if self._sediment_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
         return self._sediment_in * self._efficiency
 
     @property
     def _sediment_out(self) -> float:
-        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+        if self._sediment_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
         return self._sediment_in - self._trapped_sediment
 
     @property
     def sediment_percent_difference(self) -> float:
-        if self._sediment_in is None: raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
+        if self._sediment_in is None:
+            raise RuntimeError("Someone wrote bad code... PondInformation doesn't know _sediment_in")
         return funcs.percent_difference(self._sediment_out, self._sediment_in)
 
 @dataclass
@@ -213,13 +221,14 @@ class Graph:
         self.flowpath_travel_cost: float = config.get_flowpath_travel_cost()
         self.road_types: Dict[str, config.RoadTypeData] = config.get_road_types()
         self.rainfall_event_size = rainfall_event_size
- 
+
         self.__G.clear_edges() # We're only going to add edges if runoff > cost
 
     def process_node(self, point: shapely.geometry.point.Point) -> None:
         nodedata = self.__G.nodes[point]['nodedata']
 
-        if not isinstance(nodedata, GraphNode): raise ValueError("Node in processing list is somehow not in the graph, this should never happen!")
+        if not isinstance(nodedata, GraphNode):
+            raise ValueError("Node in processing list is somehow not in the graph, this should never happen!")
 
         nodedata.runoff._calculate_local_runoff(
             nodedata.road._local_area,
@@ -234,7 +243,8 @@ class Graph:
         )
 
         match nodedata.node_type:
-            case NodeType.POND: self.__process_pond_node(nodedata)
+            case NodeType.POND:
+                self.__process_pond_node(nodedata)
             case _:
                pass
 
@@ -247,8 +257,10 @@ class Graph:
     def __process_pond_node(self, nodedata: GraphNode) -> None:
         # TODO: Get the bulk density of sediments to update used_capacity between rainfall events
 
-        if not nodedata.pond: raise ValueError(f"Pond node {nodedata.point} does not have have a pond structure!") # This should never be the case
-        if (funcs.sum_dict(nodedata.runoff._local) != 0) or (funcs.sum_dict(nodedata.sediment._local) != 0): raise ValueError(f"Expected [runoff/sediment]._local to be zero for pond node {nodedata.point}.") # This should also never be the case!
+        if not nodedata.pond:
+            raise ValueError(f"Pond node {nodedata.point} does not have have a pond structure!") # This should never be the case
+        if (funcs.sum_dict(nodedata.runoff._local) != 0) or (funcs.sum_dict(nodedata.sediment._local) != 0):
+            raise ValueError(f"Expected [runoff/sediment]._local to be zero for pond node {nodedata.point}.") # This should also never be the case!
 
         # I don't like how I have this implemented but I don't know how else to do it right now...
         nodedata.pond._runoff_in = nodedata.runoff.sum
@@ -258,11 +270,14 @@ class Graph:
         nodedata.sediment._local = funcs.scale_dict(nodedata.sediment._ancestor, nodedata.pond.sediment_percent_difference)
 
     def __process_child_node(self, parent_node_data: GraphNode, child_node_data: GraphNode) -> None:
-        if not parent_node_data.cost_to_connect_child: raise ValueError(f"{parent_node_data.node_type} {parent_node_data.point} is incomplete to compute child node (missing cost_to_connect_child)")
+        if not parent_node_data.cost_to_connect_child:
+            raise ValueError(f"{parent_node_data.node_type} {parent_node_data.point} is incomplete to compute child node (missing cost_to_connect_child)")
 
         parent_node_data.volume_reaching_child = max(0, parent_node_data.runoff.sum - parent_node_data.cost_to_connect_child)
-        if parent_node_data.volume_reaching_child == 0: return
-        else: self.__G.add_edge(parent_node_data.point, parent_node_data.child, weight=parent_node_data.distance_to_child)
+        if parent_node_data.volume_reaching_child == 0:
+            return
+        else:
+            self.__G.add_edge(parent_node_data.point, parent_node_data.child, weight=parent_node_data.distance_to_child)
 
         parent_node_data.percent_reaching_child = parent_node_data.volume_reaching_child / parent_node_data.runoff.sum
         parent_node_data.sediment_reaching_child = parent_node_data.sediment.sum * parent_node_data.percent_reaching_child 

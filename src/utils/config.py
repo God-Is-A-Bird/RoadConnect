@@ -1,6 +1,5 @@
 import os
 import json
-from os.path import isfile
 from pathlib import Path
 from typing import List, Dict, TypedDict
 

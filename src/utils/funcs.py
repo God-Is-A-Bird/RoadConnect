@@ -15,5 +15,6 @@ def sum_dict(input_dict: Dict[str, float]) -> float:
 
 
 def percent_difference(new: float, orig: float) -> float: 
-    if orig == 0.0: return 0
+    if orig == 0.0:
+        return 0
     return (new - orig) / orig

@@ -1,5 +1,5 @@
 # /src/model/base.py
-from typing import Dict, List
+from typing import List
 from utils import config
 from model import graph
 import networkx as nx
@@ -27,7 +27,6 @@ class Model:
         self.base_graph.add_nodes(data.ponds.get_nodes())
 
     def run(self) -> List[nx.DiGraph]:
-        results: List[nx.DiGraph] = []
         processing_order = self.base_graph.get_topological_order()
 
         for rainfall_event_total in tqdm(self.rainfall_events, total=len(self.rainfall_events)):
