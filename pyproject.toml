@@ -3,15 +3,14 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "RoadConnect_GODISABIRD"
+name = "RoadConnect"
 version = "0.0.1"
 authors = [
-  { name="Rushi Bhatt", email="therushibhatt [ AT@ ] gmail [ DOT. ] com" },
-  { name="Rushi Bhatt", email="bhattrushi [ AT@ ] utexas [ DOT. ] edu" },
+  { name = "Rushi Bhatt" },
 ]
 description = "A road runoff and sediment model"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -23,6 +22,9 @@ dependencies = [
     "pandas>=2.2.3",
     "geopandas>=1.0.1",
     "shapely>=2.0.7",
+    "networkx",
+    "rasterio",
+    "tqdm",
 ]
 
 # Command-line scripts/entry points
@@ -30,11 +32,10 @@ dependencies = [
 roadconnect = "model.main:main"
 
 [project.urls]
-Homepage = "https://github.com/God-Is-A-Bird/RoadConnect"
-Issues = "https://github.com/God-Is-A-Bird/RoadConnect/issues"
-Source = "https://github.com/God-Is-A-Bird/RoadConnect"
+Homepage = "https://github.com/bhatt-rushi/RoadConnect"
+Issues = "https://github.com/bhatt-rushi/RoadConnect/issues"
+Source = "https://github.com/bhatt-rushi/RoadConnect"
 
 # Setuptools-specific configuration
-[tool.setuptools]
-packages = ["model", "utils"]
-package-dir = {"" = "src"}
+[tool.setuptools.packages.find]
+where = ["src"]

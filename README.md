@@ -46,7 +46,36 @@ The model currently requires all data to be pre-processed and provided in the co
 
   * [ ] **Visualization Tools:** Develop tools to visualize model outputs and make results interpretable.
   * [ ] **Documentation:** Prepare training materials, usage examples, and a demo dataset.
-  * [ ] **Install Instructions:** Provide instructions on creating a venv with necessary packages.
+  * [x] **Install Instructions:** Provide instructions on creating a venv with necessary packages.
+
+-----
+
+## 💾 Installation & Usage
+
+1.  **Create a Virtual Environment:**
+    ```bash
+    python3 -m venv .venv
+    ```
+
+2.  **Activate the Virtual Environment:**
+    *   On macOS and Linux:
+        ```bash
+        source .venv/bin/activate
+        ```
+    *   On Windows:
+        ```bash
+        .venv\Scripts\activate
+        ```
+
+3.  **Install the Project:**
+    ```bash
+    pip install .
+    ```
+
+4.  **Run the Model:**
+    ```bash
+    roadconnect
+    ```
 
 -----
 
